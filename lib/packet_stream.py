@@ -49,6 +49,7 @@ class ClientServerPacketStream:
         self.srv_stream = srv_stream
         self._next_cli: Packet | None = next(self.cli_stream, None)
         self._next_srv: Packet | None = next(self.srv_stream, None)
+        self.is_server: bool = True
 
     def __iter__(self) -> ClientServerPacketStream:
         return self
@@ -58,6 +59,7 @@ class ClientServerPacketStream:
         if pkt is None:
             raise StopIteration
         self._next_cli = next(self.cli_stream, None)
+        self.is_server = False
         return pkt
 
     def next_server(self) -> Packet:
@@ -65,6 +67,7 @@ class ClientServerPacketStream:
         if pkt is None:
             raise StopIteration
         self._next_srv = next(self.srv_stream, None)
+        self.is_server = True
         return pkt
 
     def next_cli_load(self) -> bytes:

@@ -1,4 +1,6 @@
+from abc import ABC, abstractmethod
 from dataclasses import Field, dataclass
+from dataclasses import field as dataclass_field
 from enum import Enum, Flag, IntEnum
 from functools import partial
 from types import EllipsisType
@@ -17,6 +19,10 @@ from datastruct.fields import (
     switch,
     text,
 )
+from PIL import Image
+
+from .constants import Encoding
+from .keysymdef import XKey
 
 datastruct_config(endianness=NETWORK, padding_pattern=b"\0")
 
@@ -96,6 +102,82 @@ class ButtonMask(EnumAdapter, Flag):
 
     def is_pressed(self, button: MouseButton) -> bool:
         return bool(self & type(self)(button.mask))
+
+
+@dataclass
+class CursorStatus:
+    button_mask: ButtonMask
+    x: int
+    y: int
+
+    @classmethod
+    def from_pointer_event(cls, pointer_event: "PointerEvent") -> Self:
+        return cls(button_mask=pointer_event.button_mask, x=pointer_event.x, y=pointer_event.y)
+
+    def update(self, pointer_event: "PointerEvent") -> None:
+        self.button_mask = pointer_event.button_mask
+        self.x = pointer_event.x
+        self.y = pointer_event.y
+
+    def is_pressed(self, button: MouseButton) -> bool:
+        return self.button_mask.is_pressed(button)
+
+    def __str__(self) -> str:
+        return f"Cursor at ({self.x}, {self.y}) with buttons {self.button_mask}"
+
+
+@dataclass
+class Framebuffer:
+    width: int
+    height: int
+    pix_fmt: "PixelFormat"
+    _cursor: CursorStatus | None = None
+    _image: Image.Image = dataclass_field(init=False)
+    _cursor_image: Image.Image = dataclass_field(init=False)
+
+    def __post_init__(self) -> None:
+        self._image = Image.new("RGBA", (self.width, self.height))
+        self._cursor_image = Image.new("RGBA", (self.width, self.height))
+
+    def update_cursor(self, cursor_event: "PointerEvent") -> None:
+        if self._cursor is None:
+            self._cursor = CursorStatus.from_pointer_event(cursor_event)
+        else:
+            self._cursor.update(cursor_event)
+
+        try:
+            self._cursor_image.putpixel((cursor_event.x, cursor_event.y), (255, 0, 0, 255))
+        except IndexError:
+            pass
+
+    @classmethod
+    def from_serverinit(cls, serverinit: "ServerInit") -> Self:
+        return cls(serverinit.width, serverinit.height, serverinit.pix_fmt)
+
+
+@dataclass
+class RFBContext:
+    client: tuple[str, int] | None = None
+    server: tuple[str, int] | None = None
+    client_version: "ProtocolVersion | None" = None
+    server_version: "ProtocolVersion | None" = None
+    security: SecurityTypeVal | None = None
+    shared_access: bool | None = None
+    name: str | None = None
+    framebuffer: Framebuffer | None = None
+    typed_text: str = ""
+
+    @property
+    def client_ip_port(self) -> str | None:
+        if self.client is None:
+            return "None"
+        return f"{self.client[0]}:{self.client[1]}"
+
+    @property
+    def server_ip_port(self) -> str | None:
+        if self.server is None:
+            return "None"
+        return f"{self.server[0]}:{self.server[1]}"
 
 
 @dataclass
@@ -198,8 +280,12 @@ class ServerInit(DataStruct):
 
 
 @dataclass
-class ClientEventBase(DataStruct):
-    pass
+class ClientEventBase(DataStruct, ABC):
+    """Base class for client events.
+    All client events must implement the `process` method."""
+
+    @abstractmethod
+    def process(self, ctx: RFBContext) -> None: ...
 
 
 @dataclass
@@ -207,12 +293,23 @@ class SetPixelFormat(ClientEventBase):
     _pad: EllipsisType = padding(3)
     pix_fmt: PixelFormat = subfield()
 
+    def process(self, ctx: RFBContext) -> None:
+        if ctx.framebuffer is None:
+            raise ValueError("Framebuffer not initialized")
+        ctx.framebuffer.pix_fmt = self.pix_fmt
+
 
 @dataclass
 class SetEncodings(ClientEventBase):
     _pad: EllipsisType = padding(1)
     num_encodings: int = built("H", lambda ctx: len(ctx.encodings))
     encodings: list[int] = repeat(lambda ctx: ctx.num_encodings)(field("i"))
+
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Set encodings: {self}")
+
+    def __str__(self) -> str:
+        return ", ".join(Encoding.get_name(e) for e in self.encodings)
 
 
 @dataclass
@@ -223,12 +320,29 @@ class FramebufferUpdateRequest(ClientEventBase):
     width: int = field("H")
     height: int = field("H")
 
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Framebuffer update request: {self}")
+
+    def __str__(self) -> str:
+        return (
+            f"{'Incremental' if self.incremental else 'Full'} update {self.width}x{self.height} "
+            f"at ({self.x}, {self.y})"
+        )
+
 
 @dataclass
 class KeyEvent(ClientEventBase):
     is_down: bool = field("?")
     _pad: EllipsisType = padding(2)
     key: int = field("I")
+
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Key event: {self}")
+        if self.is_down:
+            ctx.typed_text += XKey.get_name(self.key, raw_chars=True)
+
+    def __str__(self) -> str:
+        return f"Key {'down' if self.is_down else 'up'}: {XKey.get_name(self.key)}"
 
 
 @dataclass
@@ -237,12 +351,24 @@ class PointerEvent(ClientEventBase):
     x: int = field("H")
     y: int = field("H")
 
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Pointer event: {self}")
+        if ctx.framebuffer is None:
+            raise ValueError("Framebuffer not initialized")
+        ctx.framebuffer.update_cursor(self)
+
+    def __str__(self) -> str:
+        return f"Pointer at ({self.x}, {self.y}) with buttons {self.button_mask}"
+
 
 @dataclass
 class ClientCutText(ClientEventBase):
     _pad: EllipsisType = padding(3)
     length: int = built("I", lambda ctx: len(ctx.text))
     text: str = latin1(lambda ctx: ctx.length)
+
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Client cut text: {self}")
 
     def __str__(self) -> str:
         return f"Text: {self.text}"
@@ -259,3 +385,9 @@ class ClientEvent(DataStruct):
         _5=(PointerEvent, subfield()),
         _6=(ClientCutText, subfield()),
     )
+
+    def process(self, ctx: RFBContext) -> None:
+        self.event.process(ctx)
+
+    def __str__(self) -> str:
+        return f"[CLIENT] Event type {self.msg_type}: {self.event!r}"
