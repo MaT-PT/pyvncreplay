@@ -1,15 +1,27 @@
 from dataclasses import Field, dataclass
-from enum import Enum
+from enum import Enum, Flag, IntEnum
 from functools import partial
 from types import EllipsisType
-from typing import Self
+from typing import Iterable, Self
 
 from datastruct import NETWORK, Context, DataStruct, datastruct_config
-from datastruct.fields import adapter, align, built, const, field, repeat, subfield, text
+from datastruct.fields import (
+    adapter,
+    align,
+    built,
+    const,
+    field,
+    padding,
+    repeat,
+    subfield,
+    switch,
+    text,
+)
 
 datastruct_config(endianness=NETWORK, padding_pattern=b"\0")
 
 ascii = partial(text, encoding="ascii")
+latin1 = partial(text, encoding="latin-1")
 
 
 class EnumAdapter(Enum):
@@ -45,6 +57,45 @@ class SecurityResultVal(int, EnumAdapter):
 
     OK = 0
     FAILED = 1
+
+
+class MouseButton(IntEnum):
+    LEFT = 1
+    MIDDLE = 2
+    RIGHT = 3
+    SCROLL_UP = 4
+    SCROLL_DOWN = 5
+    SCROLL_LEFT = 6
+    SCROLL_RIGHT = 7
+    BACK = 8
+
+    @property
+    def mask_index(self) -> int:
+        return self - 1
+
+    @property
+    def mask(self) -> int:
+        return 1 << self.mask_index
+
+
+class ButtonMask(EnumAdapter, Flag):
+    __FORMAT__ = "B"
+
+    LEFT = MouseButton.LEFT.mask
+    MIDDLE = MouseButton.MIDDLE.mask
+    RIGHT = MouseButton.RIGHT.mask
+    SCROLL_UP = MouseButton.SCROLL_UP.mask
+    SCROLL_DOWN = MouseButton.SCROLL_DOWN.mask
+    SCROLL_LEFT = MouseButton.SCROLL_LEFT.mask
+    SCROLL_RIGHT = MouseButton.SCROLL_RIGHT.mask
+    BACK = MouseButton.BACK.mask
+
+    @classmethod
+    def from_pressed(cls, pressed_buttons: Iterable[MouseButton]) -> Self:
+        return cls(sum(button.mask for button in pressed_buttons))
+
+    def is_pressed(self, button: MouseButton) -> bool:
+        return bool(self & type(self)(button.mask))
 
 
 @dataclass
@@ -144,3 +195,67 @@ class ServerInit(DataStruct):
         return (
             f"Size: {self.width}x{self.height} | Name: {self.name}\nPixel format:\n{self.pix_fmt}"
         )
+
+
+@dataclass
+class ClientEventBase(DataStruct):
+    pass
+
+
+@dataclass
+class SetPixelFormat(ClientEventBase):
+    _pad: EllipsisType = padding(3)
+    pix_fmt: PixelFormat = subfield()
+
+
+@dataclass
+class SetEncodings(ClientEventBase):
+    _pad: EllipsisType = padding(1)
+    num_encodings: int = built("H", lambda ctx: len(ctx.encodings))
+    encodings: list[int] = repeat(lambda ctx: ctx.num_encodings)(field("i"))
+
+
+@dataclass
+class FramebufferUpdateRequest(ClientEventBase):
+    incremental: bool = field("?")
+    x: int = field("H")
+    y: int = field("H")
+    width: int = field("H")
+    height: int = field("H")
+
+
+@dataclass
+class KeyEvent(ClientEventBase):
+    is_down: bool = field("?")
+    _pad: EllipsisType = padding(2)
+    key: int = field("I")
+
+
+@dataclass
+class PointerEvent(ClientEventBase):
+    button_mask: ButtonMask = ButtonMask.adapter()  # type: ignore[assignment]
+    x: int = field("H")
+    y: int = field("H")
+
+
+@dataclass
+class ClientCutText(ClientEventBase):
+    _pad: EllipsisType = padding(3)
+    length: int = built("I", lambda ctx: len(ctx.text))
+    text: str = latin1(lambda ctx: ctx.length)
+
+    def __str__(self) -> str:
+        return f"Text: {self.text}"
+
+
+@dataclass
+class ClientEvent(DataStruct):
+    msg_type: int = field("B")
+    event: ClientEventBase = switch(lambda ctx: ctx.msg_type)(
+        _0=(SetPixelFormat, subfield()),
+        _2=(SetEncodings, subfield()),
+        _3=(FramebufferUpdateRequest, subfield()),
+        _4=(KeyEvent, subfield()),
+        _5=(PointerEvent, subfield()),
+        _6=(ClientCutText, subfield()),
+    )
