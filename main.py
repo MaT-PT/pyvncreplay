@@ -10,7 +10,7 @@ from scapy.layers.inet import IP, TCP
 from scapy.packet import Packet, Raw
 from scapy.plist import PacketList
 
-from lib.data_structures import (
+from lib.struct.data_structures import (
     ClientInit,
     ProtocolVersion,
     SecurityResult,
@@ -146,7 +146,6 @@ def get_streams(pcap: PacketList) -> ClientServerPacketStream:
             not_found.append("client")
         if not srv_packets:
             not_found.append("server")
-        # print(f"Error getting VNC session: could not find {' and '.join(not_found)} packets")
         raise ValueError(
             f"Error getting VNC session: could not find {' and '.join(not_found)} packets"
         )
