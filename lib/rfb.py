@@ -15,6 +15,7 @@ from .struct.data_structures import (
     SecurityTypeVal,
     SelectedSecurityType,
     ServerInit,
+    ServerSecurityType,
     SupportedSecurityTypes,
     VNCSecurityChallenge,
 )
@@ -33,13 +34,19 @@ def process_handshake(stream: ClientServerPacketStream, rfb_context: RFBContext)
     print(f"Server version: {rfb_context.server_version}")
     print(f"Client version: {rfb_context.client_version}")
 
-    # TODO: support protocol version 3.3 with no security selection
-    srv_security_types = SupportedSecurityTypes.unpack(stream.next_srv_load())
-    print(f"Server supported security types: {srv_security_types}")
+    effective_version = min(rfb_context.server_version, rfb_context.client_version)
 
-    cli_security_selected = SelectedSecurityType.unpack(stream.next_cli_load())
-    print(f"Client selected security type: {cli_security_selected}")
-    rfb_context.security = cli_security_selected.type
+    if effective_version > "3.3":
+        srv_security_types = SupportedSecurityTypes.unpack(stream.next_srv_load())
+        print(f"Server supported security types: {srv_security_types}")
+
+        cli_security_selected = SelectedSecurityType.unpack(stream.next_cli_load())
+        print(f"Client selected security type: {cli_security_selected}")
+        rfb_context.security = cli_security_selected.type
+    else:
+        srv_security = ServerSecurityType.unpack(stream.next_srv_load())
+        print(f"Server selected security type: {srv_security}")
+        rfb_context.security = srv_security.type
 
     match rfb_context.security:
         case SecurityTypeVal.NONE:
@@ -54,7 +61,7 @@ def process_handshake(stream: ClientServerPacketStream, rfb_context: RFBContext)
             print(f"Client VNC security challenge: {cli_vnc_challenge}")
 
         case _:
-            raise ValueError(f"Unsupported security type: {cli_security_selected.type}")
+            raise ValueError(f"Unsupported security type: {rfb_context.security}")
 
     srv_security_result = SecurityResult.unpack(stream.next_srv_load())
     print(f"Server security result: {srv_security_result}")

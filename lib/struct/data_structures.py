@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from dataclasses import Field, dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum, Flag, IntEnum
-from functools import partial
+from functools import partial, total_ordering
 from types import EllipsisType
 from typing import Iterable, Self
 
@@ -42,8 +42,10 @@ class EnumAdapter(Enum):
         return cls(value)
 
     @classmethod
-    def adapter(cls) -> Field[Self]:
-        return adapter(encode=cls._encode, decode=cls._decode)(field(cls.__FORMAT__))
+    def adapter(cls, fmt: str | None = None) -> Field[Self]:
+        if fmt is None:
+            fmt = cls.__FORMAT__
+        return adapter(encode=cls._encode, decode=cls._decode)(field(fmt))
 
     def __str__(self) -> str:
         return f"{self.name} ({self.value})"
@@ -192,6 +194,7 @@ class RFBContext:
 
 
 @dataclass
+@total_ordering
 class ProtocolVersion(DataStruct):
     signature: bytes = const(b"RFB ")(field("4s"))
     ver_major: str = ascii(3)
@@ -199,9 +202,36 @@ class ProtocolVersion(DataStruct):
     ver_minor: str = ascii(3)
     newline: bytes = const(b"\n")(field("1s"))
 
+    @classmethod
+    def create(cls, value: str | tuple[int | str, int | str]) -> Self:
+        if isinstance(value, str) and len(parts := value.split(".")) == 2:
+            return cls(ver_major=parts[0], ver_minor=parts[1])
+        if isinstance(value, tuple) and len(value) == 2:
+            return cls(ver_major=f"{value[0]:03}", ver_minor=f"{value[1]:03}")
+        raise ValueError("Invalid version format")
+
+    @property
+    def version(self) -> tuple[int, int]:
+        return int(self.ver_major), int(self.ver_minor)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ProtocolVersion):
+            try:
+                other = ProtocolVersion.create(other)  # type: ignore[arg-type]
+            except ValueError:
+                return False
+        return self.version == other.version
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, ProtocolVersion):
+            try:
+                other = ProtocolVersion.create(other)  # type: ignore[arg-type]
+            except ValueError:
+                raise NotImplementedError
+        return self.version < other.version
+
     def __str__(self) -> str:
-        ver_maj = int(self.ver_major)
-        ver_min = int(self.ver_minor)
+        ver_maj, ver_min = self.version
         return f"{ver_maj}{self.ver_sep.decode()}{ver_min}"
 
 
@@ -218,6 +248,14 @@ class SupportedSecurityTypes(DataStruct):
 @dataclass
 class SelectedSecurityType(DataStruct):
     type: SecurityTypeVal = SecurityTypeVal.adapter()  # type: ignore[assignment]
+
+    def __str__(self) -> str:
+        return str(self.type)
+
+
+@dataclass
+class ServerSecurityType(DataStruct):
+    type: SecurityTypeVal = SecurityTypeVal.adapter(fmt="I")  # type: ignore[assignment]
 
     def __str__(self) -> str:
         return str(self.type)
