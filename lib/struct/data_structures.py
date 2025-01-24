@@ -210,6 +210,15 @@ class RFBContext:
 
 
 @dataclass
+class String(DataStruct):
+    length: int = built("I", lambda ctx: len(ctx.value))
+    value: str = text(lambda ctx: ctx.length)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass
 @total_ordering
 class ProtocolVersion(DataStruct):
     signature: bytes = const(b"RFB ")(field("4s"))
@@ -306,7 +315,7 @@ class PixelFormat(DataStruct):
     bits_per_pixel: int = field("B")
     depth: int = field("B")
     big_endian: bool = field("?")
-    true_color: bool = field("?")
+    true_colour: bool = field("?")
     red_max: int = field("H")
     green_max: int = field("H")
     blue_max: int = field("H")
@@ -319,7 +328,7 @@ class PixelFormat(DataStruct):
         return (
             f"{self.bits_per_pixel} bpp, {self.depth}-bit depth, "
             f"{'big' if self.big_endian else 'little'} endian, "
-            f"true color: {'yes' if self.true_color else 'no'}, "
+            f"true color: {'yes' if self.true_colour else 'no'}, "
             f"RGB max: ({self.red_max}, {self.green_max}, {self.blue_max}), "
             f"shifts: ({self.red_shift}, {self.green_shift}, {self.blue_shift})"
         )
@@ -329,7 +338,7 @@ class PixelFormat(DataStruct):
             f"- Bits per pixel: {self.bits_per_pixel}\n"
             f"- Depth: {self.depth}\n"
             f"- Big endian: {self.big_endian}\n"
-            f"- True color: {self.true_color}\n"
+            f"- True color: {self.true_colour}\n"
             f"- Red max: {self.red_max}\n"
             f"- Green max: {self.green_max}\n"
             f"- Blue max: {self.blue_max}\n"
@@ -344,8 +353,7 @@ class ServerInit(DataStruct):
     width: int = field("H")
     height: int = field("H")
     pix_fmt: PixelFormat = subfield()
-    name_len: int = built("I", lambda ctx: len(ctx.name))
-    name: str = text(lambda ctx: ctx.name_len)
+    name: String = subfield()
 
     def __str__(self) -> str:
         return (
@@ -442,12 +450,11 @@ class PointerEvent(ClientEventBase):
 @dataclass
 class ClientCutText(ClientEventBase):
     _pad: EllipsisType = padding(3)
-    length: int = built("I", lambda ctx: len(ctx.text))
-    text: str = latin1(lambda ctx: ctx.length)
+    text: String = subfield()
 
     def process(self, ctx: RFBContext) -> None:
         print(f"Client cut text: {self}")
-        ctx.clipboard = self.text
+        ctx.clipboard = str(self.text)
 
     def __str__(self) -> str:
         return f"Text: {self.text}"
