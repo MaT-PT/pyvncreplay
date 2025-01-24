@@ -1,7 +1,78 @@
-from enum import IntEnum
+from enum import Flag, IntEnum
+from typing import Iterable, Self
 
 
-class Encoding(IntEnum):
+class PrettyEnum(IntEnum):
+    def __str__(self) -> str:
+        return f"{self.name} ({self.value})"
+
+
+class SecurityTypeVal(PrettyEnum):
+    INVALID = 0
+    NONE = 1
+    VNC_AUTHENTICATION = 2
+    RSA_AES = 5
+    RSA_AES_UNENCRYPTED = 6
+    RSA_AES_TWO_STEP = 13
+    TIGHT = 16
+    VENCRYPT = 19
+    SASL = 20
+    XVP_AUTHENTICATION = 22
+    DIFFIE_HELLMAN_AUTHENTICATION = 30
+    MSLOGONII_AUTHENTICATION = 113
+    RSA_AES_256 = 129
+    RSA_AES_256_UNENCRYPTED = 130
+    RSA_AES_256_TWO_STEP = 133
+
+
+class SecurityResultVal(PrettyEnum):
+    OK = 0
+    FAILED = 1
+    FAILED_TOO_MANY_ATTEMPTS = 2
+
+
+class MouseButton(PrettyEnum):
+    LEFT = 1
+    MIDDLE = 2
+    RIGHT = 3
+    SCROLL_UP = 4
+    SCROLL_DOWN = 5
+    SCROLL_LEFT = 6
+    SCROLL_RIGHT = 7
+    BACK = 8
+
+    @property
+    def mask_index(self) -> int:
+        return self - 1
+
+    @property
+    def mask(self) -> int:
+        return 1 << self.mask_index
+
+
+class ButtonMask(Flag):
+    NONE = 0
+    LEFT = MouseButton.LEFT.mask
+    MIDDLE = MouseButton.MIDDLE.mask
+    RIGHT = MouseButton.RIGHT.mask
+    SCROLL_UP = MouseButton.SCROLL_UP.mask
+    SCROLL_DOWN = MouseButton.SCROLL_DOWN.mask
+    SCROLL_LEFT = MouseButton.SCROLL_LEFT.mask
+    SCROLL_RIGHT = MouseButton.SCROLL_RIGHT.mask
+    BACK = MouseButton.BACK.mask
+
+    @classmethod
+    def from_pressed(cls, pressed_buttons: Iterable[MouseButton]) -> Self:
+        return cls(sum(button.mask for button in pressed_buttons))
+
+    def is_pressed(self, button: MouseButton) -> bool:
+        return bool(self & type(self)(button.mask))
+
+    def __str__(self) -> str:
+        return super().__str__().removeprefix(f"{type(self).__name__}.")
+
+
+class Encoding(PrettyEnum):
     RAW = 0
     COPYRECT = 1
     RRE = 2

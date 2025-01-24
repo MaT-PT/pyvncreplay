@@ -4,6 +4,7 @@ from scapy.layers.inet import IP, TCP
 from scapy.plist import PacketList
 
 from .packet_stream import ClientServerPacketStream, get_streams
+from .struct.constants import SecurityResultVal, SecurityTypeVal
 from .struct.data_structures import (
     ClientEvent,
     ClientInit,
@@ -11,8 +12,6 @@ from .struct.data_structures import (
     ProtocolVersion,
     RFBContext,
     SecurityResult,
-    SecurityResultVal,
-    SecurityTypeVal,
     SelectedSecurityType,
     ServerInit,
     ServerSecurityType,

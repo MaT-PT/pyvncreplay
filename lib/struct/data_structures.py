@@ -1,121 +1,21 @@
 from abc import ABC, abstractmethod
-from dataclasses import Field, dataclass
+from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from enum import Enum, Flag, IntEnum
 from functools import partial, total_ordering
 from types import EllipsisType
-from typing import Iterable, Self
+from typing import Self
 
-from datastruct import NETWORK, Context, DataStruct, datastruct_config
-from datastruct.fields import (
-    adapter,
-    align,
-    built,
-    const,
-    field,
-    padding,
-    repeat,
-    subfield,
-    switch,
-    text,
-)
+from datastruct import NETWORK, DataStruct, datastruct_config
+from datastruct.fields import align, built, const, field, padding, repeat, subfield, switch, text
 from PIL import Image
 
-from .constants import Encoding
+from .constants import ButtonMask, Encoding, MouseButton, SecurityResultVal, SecurityTypeVal
 from .keysymdef import XKey
 
 datastruct_config(endianness=NETWORK, padding_pattern=b"\0")
 
 ascii = partial(text, encoding="ascii")
 latin1 = partial(text, encoding="latin-1")
-
-
-class EnumAdapter(Enum):
-    __FORMAT__: str = "I"
-
-    @classmethod
-    def _encode(cls, value: Self, ctx: Context) -> int:
-        return value.value
-
-    @classmethod
-    def _decode(cls, value: int, ctx: Context) -> Self:
-        return cls(value)
-
-    @classmethod
-    def adapter(cls, fmt: str | None = None) -> Field[Self]:
-        if fmt is None:
-            fmt = cls.__FORMAT__
-        return adapter(encode=cls._encode, decode=cls._decode)(field(fmt))
-
-    def __str__(self) -> str:
-        return f"{self.name} ({self.value})"
-
-
-class SecurityTypeVal(int, EnumAdapter):
-    __FORMAT__ = "B"
-
-    INVALID = 0
-    NONE = 1
-    VNC_AUTHENTICATION = 2
-    RSA_AES = 5
-    RSA_AES_UNENCRYPTED = 6
-    RSA_AES_TWO_STEP = 13
-    TIGHT = 16
-    VENCRYPT = 19
-    SASL = 20
-    XVP_AUTHENTICATION = 22
-    DIFFIE_HELLMAN_AUTHENTICATION = 30
-    MSLOGONII_AUTHENTICATION = 113
-    RSA_AES_256 = 129
-    RSA_AES_256_UNENCRYPTED = 130
-    RSA_AES_256_TWO_STEP = 133
-
-
-class SecurityResultVal(int, EnumAdapter):
-    __FORMAT__ = "I"
-
-    OK = 0
-    FAILED = 1
-    FAILED_TOO_MANY_ATTEMPTS = 2
-
-
-class MouseButton(IntEnum):
-    LEFT = 1
-    MIDDLE = 2
-    RIGHT = 3
-    SCROLL_UP = 4
-    SCROLL_DOWN = 5
-    SCROLL_LEFT = 6
-    SCROLL_RIGHT = 7
-    BACK = 8
-
-    @property
-    def mask_index(self) -> int:
-        return self - 1
-
-    @property
-    def mask(self) -> int:
-        return 1 << self.mask_index
-
-
-class ButtonMask(EnumAdapter, Flag):
-    __FORMAT__ = "B"
-
-    LEFT = MouseButton.LEFT.mask
-    MIDDLE = MouseButton.MIDDLE.mask
-    RIGHT = MouseButton.RIGHT.mask
-    SCROLL_UP = MouseButton.SCROLL_UP.mask
-    SCROLL_DOWN = MouseButton.SCROLL_DOWN.mask
-    SCROLL_LEFT = MouseButton.SCROLL_LEFT.mask
-    SCROLL_RIGHT = MouseButton.SCROLL_RIGHT.mask
-    BACK = MouseButton.BACK.mask
-
-    @classmethod
-    def from_pressed(cls, pressed_buttons: Iterable[MouseButton]) -> Self:
-        return cls(sum(button.mask for button in pressed_buttons))
-
-    def is_pressed(self, button: MouseButton) -> bool:
-        return bool(self & type(self)(button.mask))
 
 
 @dataclass
@@ -281,7 +181,7 @@ class SupportedSecurityTypes(DataStruct):
 
 @dataclass
 class SelectedSecurityType(DataStruct):
-    type: SecurityTypeVal = SecurityTypeVal.adapter()  # type: ignore[assignment]
+    type: SecurityTypeVal = field("B")
 
     def __str__(self) -> str:
         return str(self.type)
@@ -289,7 +189,7 @@ class SelectedSecurityType(DataStruct):
 
 @dataclass
 class ServerSecurityType(DataStruct):
-    type: SecurityTypeVal = SecurityTypeVal.adapter(fmt="I")  # type: ignore[assignment]
+    type: SecurityTypeVal = field("I")
 
     def __str__(self) -> str:
         return str(self.type)
@@ -297,7 +197,7 @@ class ServerSecurityType(DataStruct):
 
 @dataclass
 class SecurityResult(DataStruct):
-    result: SecurityResultVal = SecurityResultVal.adapter()  # type: ignore[assignment]
+    result: SecurityResultVal = field("I")
 
     def __str__(self) -> str:
         return str(self.result)
@@ -442,7 +342,7 @@ class KeyEvent(ClientEventBase):
 
 @dataclass
 class PointerEvent(ClientEventBase):
-    button_mask: ButtonMask = ButtonMask.adapter()  # type: ignore[assignment]
+    button_mask: ButtonMask = field("B")
     x: int = field("H")
     y: int = field("H")
 
