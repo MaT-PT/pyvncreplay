@@ -76,6 +76,7 @@ class SecurityResultVal(int, EnumAdapter):
 
     OK = 0
     FAILED = 1
+    FAILED_TOO_MANY_ATTEMPTS = 2
 
 
 class MouseButton(IntEnum):
@@ -262,9 +263,17 @@ class ProtocolVersion(DataStruct):
 
 @dataclass
 class SupportedSecurityTypes(DataStruct):
-    # TODO: support case where num_types is 0 (error with message [int, vartext])
     num_types: int = built("B", lambda ctx: len(ctx.types))
-    types: list[int] = repeat(lambda ctx: ctx.num_types)(field("B"))
+    _types: String | list[int] = switch(lambda ctx: ctx.num_types)(
+        _0=(String, subfield()),
+        default=(list[int], repeat(lambda ctx: ctx.num_types)(field("B"))),
+    )
+
+    @property
+    def types(self) -> list[int]:
+        if isinstance(self._types, String):
+            raise ValueError(f"Server sent error instead of security types: {self._types}")
+        return self._types
 
     def __str__(self) -> str:
         return ", ".join(str(t) for t in self.types)
