@@ -178,7 +178,8 @@ class RFBContext:
     shared_access: bool | None = None
     name: str | None = None
     framebuffer: Framebuffer | None = None
-    typed_text: str = ""
+    _typed_text: str = ""
+    _clipboard: str = ""
 
     @property
     def client_ip_port(self) -> str | None:
@@ -191,6 +192,21 @@ class RFBContext:
         if self.server is None:
             return "None"
         return f"{self.server[0]}:{self.server[1]}"
+
+    def type_key(self, key: int) -> None:
+        self._typed_text += XKey.get_name(key, raw_chars=True)
+
+    @property
+    def typed_text(self) -> str:
+        return self._typed_text
+
+    @property
+    def clipboard(self) -> str:
+        return self._clipboard
+
+    @clipboard.setter
+    def clipboard(self, value: str) -> None:
+        self._clipboard = value
 
 
 @dataclass
@@ -301,6 +317,15 @@ class PixelFormat(DataStruct):
 
     def __str__(self) -> str:
         return (
+            f"{self.bits_per_pixel} bpp, {self.depth}-bit depth, "
+            f"{'big' if self.big_endian else 'little'} endian, "
+            f"true color: {'yes' if self.true_color else 'no'}, "
+            f"RGB max: ({self.red_max}, {self.green_max}, {self.blue_max}), "
+            f"shifts: ({self.red_shift}, {self.green_shift}, {self.blue_shift})"
+        )
+
+    def pretty(self) -> str:
+        return (
             f"- Bits per pixel: {self.bits_per_pixel}\n"
             f"- Depth: {self.depth}\n"
             f"- Big endian: {self.big_endian}\n"
@@ -324,7 +349,7 @@ class ServerInit(DataStruct):
 
     def __str__(self) -> str:
         return (
-            f"Size: {self.width}x{self.height} | Name: {self.name}\nPixel format:\n{self.pix_fmt}"
+            f"Size: {self.width}x{self.height} | Name: {self.name} | Pixel format: {self.pix_fmt}"
         )
 
 
@@ -343,9 +368,13 @@ class SetPixelFormat(ClientEventBase):
     pix_fmt: PixelFormat = subfield()
 
     def process(self, ctx: RFBContext) -> None:
+        print(f"Set pixel format: {self}")
         if ctx.framebuffer is None:
             raise ValueError("Framebuffer not initialized")
         ctx.framebuffer.pix_fmt = self.pix_fmt
+
+    def __str__(self) -> str:
+        return str(self.pix_fmt)
 
 
 @dataclass
@@ -388,7 +417,7 @@ class KeyEvent(ClientEventBase):
     def process(self, ctx: RFBContext) -> None:
         print(f"Key event: {self}")
         if self.is_down:
-            ctx.typed_text += XKey.get_name(self.key, raw_chars=True)
+            ctx.type_key(self.key)
 
     def __str__(self) -> str:
         return f"Key {'down' if self.is_down else 'up'}: {XKey.get_name(self.key)}"
@@ -418,6 +447,7 @@ class ClientCutText(ClientEventBase):
 
     def process(self, ctx: RFBContext) -> None:
         print(f"Client cut text: {self}")
+        ctx.clipboard = self.text
 
     def __str__(self) -> str:
         return f"Text: {self.text}"
