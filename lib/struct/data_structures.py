@@ -52,10 +52,21 @@ class EnumAdapter(Enum):
 class SecurityTypeVal(int, EnumAdapter):
     __FORMAT__ = "B"
 
-    # TODO: Support more security types
     INVALID = 0
     NONE = 1
     VNC_AUTHENTICATION = 2
+    RSA_AES = 5
+    RSA_AES_UNENCRYPTED = 6
+    RSA_AES_TWO_STEP = 13
+    TIGHT = 16
+    VENCRYPT = 19
+    SASL = 20
+    XVP_AUTHENTICATION = 22
+    DIFFIE_HELLMAN_AUTHENTICATION = 30
+    MSLOGONII_AUTHENTICATION = 113
+    RSA_AES_256 = 129
+    RSA_AES_256_UNENCRYPTED = 130
+    RSA_AES_256_TWO_STEP = 133
 
 
 class SecurityResultVal(int, EnumAdapter):
