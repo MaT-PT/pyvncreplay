@@ -1,24 +1,120 @@
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Buffer
+from io import SEEK_CUR, SEEK_END, SEEK_SET, BufferedIOBase
+from typing import BinaryIO, Iterable, Self
 
 from scapy.layers.inet import TCP
 from scapy.packet import Packet, Raw
 from scapy.plist import PacketList
 
 
-class PacketStream:
+class PacketStreamBytes(Iterable[bytes]):
+    def __init__(self, packets: Iterable[Packet]) -> None:
+        self.packets = iter(packets)
+
+    def __iter__(self) -> Self:
+        return self
+
+    def __next__(self) -> bytes:
+        return next(self.packets).load
+
+
+class DataStreamReader(BufferedIOBase, BinaryIO):
+    def __init__(self, datastream: Iterable[bytes]) -> None:
+        self._datastream = iter(datastream)
+        self._buffer: bytes = b""
+        self._buffer_offset: int = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def writable(self) -> bool:
+        return False
+
+    def seekable(self) -> bool:
+        return True
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        if size == 0:
+            return b""
+
+        if size is not None and size < 0:
+            size = None
+
+        while size is None or len(self._buffer) - self._buffer_offset < size:
+            try:
+                data = next(self._datastream)
+            except StopIteration:
+                break
+            self._buffer += data
+
+        if size is None:
+            new_offset = len(self._buffer)
+        else:
+            new_offset = self._buffer_offset + size
+        data = self._buffer[self._buffer_offset : new_offset]
+        self._buffer_offset = new_offset
+        return data
+
+    read1 = read
+
+    def readall(self) -> bytes:
+        return self.read()
+
+    def tell(self) -> int:
+        return self._buffer_offset
+
+    def seek(self, offset: int, whence: int = SEEK_SET, /) -> int:
+        to_read: int | None = None  # None means read all
+        if whence == SEEK_SET:
+            if offset < 0:
+                raise ValueError(f"negative seek value {offset}")
+            to_read = offset - self._buffer_offset
+        elif whence == SEEK_CUR:
+            to_read = offset
+        elif whence == SEEK_END:
+            to_read = None
+        else:
+            raise ValueError(f"invalid whence ({whence}, should be 0, 1 or 2)")
+
+        if to_read is not None and to_read < 0:
+            self._buffer_offset += to_read
+            if self._buffer_offset < 0:
+                self._buffer_offset = 0
+            return self._buffer_offset
+
+        self.read(to_read)
+        if whence == SEEK_END:
+            self._buffer_offset = len(self._buffer) + offset
+        return self._buffer_offset
+
+    # The following methods are necessary to prevent type checking errors
+
+    def write(self, buffer: Buffer, /) -> int:
+        return super().write(buffer)
+
+    def writelines(self, lines: Iterable[Buffer], /) -> None:
+        return super().writelines(lines)
+
+    def __enter__(self) -> Self:
+        return self
+
+
+class PacketStream(Iterable[Packet]):
     def __init__(self, packets: Iterable[Packet]) -> None:
         self._iter = iter(packets)
         self._next: Packet | None = next(self._iter, None)
+        self._timestamp: float = float(self._next.time) if self._next is not None else 0.0
 
-    def __iter__(self) -> PacketStream:
+    def __iter__(self) -> Self:
         return self
 
     def __next__(self) -> Packet:
         pkt = self._next
         if pkt is None:
             raise StopIteration
+        self._timestamp = float(pkt.time)
         self._next = next(self._iter, None)
         return pkt
 
@@ -30,12 +126,14 @@ class PacketStream:
 
     @property
     def timestamp(self) -> float:
-        if self._next is None:
-            raise StopIteration
-        return float(self._next.time)
+        return self._timestamp
+
+    @property
+    def bytestream(self) -> DataStreamReader:
+        return DataStreamReader(PacketStreamBytes(self))
 
 
-class ClientServerPacketStream:
+class ClientServerPacketStream(Iterable[Packet]):
     def __init__(
         self,
         cli_stream: PacketStream | Iterable[Packet],
@@ -51,7 +149,7 @@ class ClientServerPacketStream:
         self._next_srv: Packet | None = next(self.srv_stream, None)
         self.is_server: bool = True
 
-    def __iter__(self) -> ClientServerPacketStream:
+    def __iter__(self) -> Self:
         return self
 
     def next_client(self) -> Packet:
@@ -90,12 +188,20 @@ class ClientServerPacketStream:
         return self.next_server()
 
     @property
+    def client_timestamp(self) -> float:
+        return self.cli_stream.timestamp
+
+    @property
+    def server_timestamp(self) -> float:
+        return self.srv_stream.timestamp
+
+    @property
     def timestamp(self) -> float:
         if self._next_cli is None:
-            return self.srv_stream.timestamp
+            return self.server_timestamp
         if self._next_srv is None:
-            return self.cli_stream.timestamp
-        return min(self.cli_stream.timestamp, self.srv_stream.timestamp)
+            return self.client_timestamp
+        return min(self.client_timestamp, self.server_timestamp)
 
 
 def get_streams(pcap: PacketList) -> ClientServerPacketStream:

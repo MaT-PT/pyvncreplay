@@ -3,21 +3,23 @@ from __future__ import annotations
 from scapy.layers.inet import IP, TCP
 from scapy.plist import PacketList
 
-from .packet_stream import ClientServerPacketStream, get_streams
-from .struct.constants import SecurityResultVal, SecurityTypeVal
-from .struct.data_structures import (
+from .constants import SecurityResultVal, SecurityTypeVal
+from .data_structures import (
     ClientEvent,
+    ClientEventStream,
     ClientInit,
     Framebuffer,
     ProtocolVersion,
     RFBContext,
     SecurityResult,
     SelectedSecurityType,
+    ServerEvent,
     ServerInit,
     ServerSecurityType,
     SupportedSecurityTypes,
     VNCSecurityChallenge,
 )
+from .packet_stream import ClientServerPacketStream, get_streams
 
 
 def process_handshake(stream: ClientServerPacketStream, rfb_context: RFBContext) -> None:
@@ -78,20 +80,37 @@ def process_handshake(stream: ClientServerPacketStream, rfb_context: RFBContext)
 
 
 def process_events(stream: ClientServerPacketStream, rfb_context: RFBContext) -> None:
+    event: ClientEvent | ServerEvent
     for packet in stream:
+        load: bytes = packet.load
+        event_type = load[0]
+
         if stream.is_server:
-            print("[SERVER]")
+            try:
+                event = ServerEvent.unpack(load, rfb_context=rfb_context)
+            except ValueError:
+                print(f"[SERVER] Unknown event type: {event_type}")
+                # continue
+                raise
+            print(event)
+            event.process(rfb_context)
         else:
-            event = ClientEvent.unpack(packet.load)
+            event = ClientEvent.unpack(load)
             print(event)
             event.process(rfb_context)
 
 
 def process_pcap(pcap: PacketList) -> None:
     stream = get_streams(pcap)
-    rfb_context = RFBContext()
+    rfb_context = RFBContext(stream)
     process_handshake(stream, rfb_context)
-    process_events(stream, rfb_context)
+    # process_events(stream, rfb_context)
+
+    cli_events = ClientEventStream.unpack(stream.cli_stream.bytestream, rfb_context=rfb_context)
+    print("Client events:")
+    for event in cli_events.events:
+        print(f"[{event.timestamp}]: {event}")
+        event.process(rfb_context)
 
     print()
     print("Typed text:")
@@ -99,7 +118,7 @@ def process_pcap(pcap: PacketList) -> None:
     print(rfb_context.typed_text)
     print("-" * 80)
 
-    if rfb_context.framebuffer is not None:
-        rfb_context.framebuffer._cursor_image.show()
+    # if rfb_context.framebuffer is not None:
+    #     rfb_context.framebuffer._cursor_image.show()
 
     print("Done")

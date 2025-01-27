@@ -5,12 +5,25 @@ from functools import partial, total_ordering
 from types import EllipsisType
 from typing import Self
 
-from datastruct import NETWORK, DataStruct, datastruct_config
-from datastruct.fields import align, built, const, field, padding, repeat, subfield, switch, text
+from datastruct import NETWORK, Context, DataStruct, datastruct_config
+from datastruct.fields import (
+    align,
+    built,
+    const,
+    field,
+    padding,
+    probe,
+    repeat,
+    subfield,
+    switch,
+    text,
+    virtual,
+)
 from PIL import Image
 
 from .constants import ButtonMask, Encoding, MouseButton, SecurityResultVal, SecurityTypeVal
 from .keysymdef import XKey
+from .packet_stream import ClientServerPacketStream
 
 datastruct_config(endianness=NETWORK, padding_pattern=b"\0")
 
@@ -71,6 +84,7 @@ class Framebuffer:
 
 @dataclass
 class RFBContext:
+    packet_stream: ClientServerPacketStream
     client: tuple[str, int] | None = None
     server: tuple[str, int] | None = None
     client_version: "ProtocolVersion | None" = None
@@ -289,12 +303,20 @@ class ServerInit(DataStruct):
 
 
 @dataclass
-class ClientEventBase(DataStruct, ABC):
-    """Base class for client events.
-    All client events must implement the `process` method."""
+class EventBase(DataStruct, ABC):
+    """Base class for client and server events.
+    All events must implement the `process` and `__str__` methods."""
 
     @abstractmethod
     def process(self, ctx: RFBContext) -> None: ...
+
+    @abstractmethod
+    def __str__(self) -> str: ...
+
+
+@dataclass
+class ClientEventBase(EventBase, ABC):
+    """Base class for client events."""
 
 
 @dataclass
@@ -390,6 +412,7 @@ class ClientCutText(ClientEventBase):
 @dataclass
 class ClientEvent(DataStruct):
     msg_type: int = field("B")
+    timestamp: float = virtual(lambda ctx: ctx._.rfb_context.packet_stream.client_timestamp)
     event: ClientEventBase = switch(lambda ctx: ctx.msg_type)(
         _0=(SetPixelFormat, subfield()),
         _2=(SetEncodings, subfield()),
@@ -404,3 +427,133 @@ class ClientEvent(DataStruct):
 
     def __str__(self) -> str:
         return f"[CLIENT] Event type {self.msg_type}: {self.event!r}"
+
+
+@dataclass
+class ServerEventBase(EventBase, ABC):
+    """Base class for server events."""
+
+
+@dataclass
+class FramebufferUpdatePixelData(DataStruct, ABC): ...
+
+
+@dataclass
+class FramebufferUpdateRaw(FramebufferUpdatePixelData):
+    _: EllipsisType = probe()
+    # pixels: bytes = subfield()
+
+    # def __str__(self) -> str:
+    #     return f"Raw data: {len(self.pixels)} bytes"
+
+
+@dataclass
+class FramebufferUpdateRectangle(DataStruct):
+    x: int = field("H")
+    y: int = field("H")
+    width: int = field("H")
+    height: int = field("H")
+    encoding: Encoding = field("i")
+    data: FramebufferUpdatePixelData = switch(lambda ctx: ctx.encoding)(
+        RAW=(FramebufferUpdateRaw, subfield()),
+        ZRLE=(FramebufferUpdateRaw, subfield()),
+        PSEUDO_CURSOR_WITH_ALPHA=(FramebufferUpdateRaw, subfield()),
+    )
+
+    def __str__(self) -> str:
+        return f"Update {self.width}x{self.height} at ({self.x}, {self.y}) with encoding {self.encoding}"
+
+
+@dataclass
+class FramebufferUpdate(ServerEventBase):
+    _pad: EllipsisType = padding(1)
+    num_rects: int = built("H", lambda ctx: len(ctx.rects))
+    rectangles: list[FramebufferUpdateRectangle] = repeat(lambda ctx: ctx.num_rects)(subfield())
+
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Framebuffer update: {self}")
+
+    def __str__(self) -> str:
+        return f"Rectangles: {self.num_rects}"
+
+
+@dataclass
+class Colour(DataStruct):
+    red: int = field("H")
+    green: int = field("H")
+    blue: int = field("H")
+
+    def __str__(self) -> str:
+        return f"({self.red}, {self.green}, {self.blue})"
+
+
+@dataclass
+class SetColourMapEntries(ServerEventBase):
+    _pad: EllipsisType = padding(1)
+    first_colour: int = field("H")
+    num_colours: int = built("H", lambda ctx: len(ctx.colours))
+    colours: list[Colour] = repeat(lambda ctx: ctx.num_colours)(subfield())
+
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Set colour map entries: {self}")
+
+    def __str__(self) -> str:
+        cols = ", ".join(str(c) for c in self.colours)
+        return f"First colour: {self.first_colour}, colours: {cols}"
+
+
+@dataclass
+class Bell(ServerEventBase):
+    def process(self, ctx: RFBContext) -> None:
+        print("*DING!*")
+
+    def __str__(self) -> str:
+        return "Bell event"
+
+
+@dataclass
+class ServerCutText(ServerEventBase):
+    _pad: EllipsisType = padding(3)
+    text: StringLatin1 = subfield()
+
+    def process(self, ctx: RFBContext) -> None:
+        print(f"Server cut text: {self}")
+        ctx.clipboard = str(self.text)
+
+    def __str__(self) -> str:
+        return str(self.text)
+
+
+@dataclass
+class ServerEvent(DataStruct):
+    msg_type: int = field("B")
+    timestamp: float = virtual(lambda ctx: ctx._.rfb_context.packet_stream.server_timestamp)
+    event: ServerEventBase = switch(lambda ctx: ctx.msg_type)(
+        _0=(FramebufferUpdate, subfield()),
+        _1=(SetColourMapEntries, subfield()),
+        _2=(Bell, subfield()),
+        _3=(ServerCutText, subfield()),
+    )
+
+    def process(self, ctx: RFBContext) -> None:
+        self.event.process(ctx)
+
+    def __str__(self) -> str:
+        return f"[SERVER] Event type {self.msg_type}: {self.event!r}"
+
+
+def not_eof(ctx: Context) -> bool:
+    peek = ctx.P.peek
+    if peek is None:
+        return False
+    return len(peek(1)) > 0
+
+
+@dataclass
+class ClientEventStream(DataStruct):
+    events: list[ClientEvent] = repeat(when=not_eof)(subfield())
+
+
+@dataclass
+class ServerEventStream(DataStruct):
+    events: list[ServerEvent] = repeat(when=not_eof)(subfield())
