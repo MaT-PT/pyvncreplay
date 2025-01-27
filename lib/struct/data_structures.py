@@ -111,12 +111,30 @@ class RFBContext:
 
 
 @dataclass
-class String(DataStruct):
-    length: int = built("I", lambda ctx: len(ctx.value))
-    value: str = text(lambda ctx: ctx.length)
+class StringBase(DataStruct, ABC):
+    length: int
+    value: str
 
     def __str__(self) -> str:
         return self.value
+
+
+@dataclass
+class StringUtf8(StringBase):
+    length: int = built("I", lambda ctx: len(ctx.value.encode("utf-8")))
+    value: str = text(lambda ctx: ctx.length)
+
+
+@dataclass
+class StringLatin1(StringBase):
+    length: int = built("I", lambda ctx: len(ctx.value.encode("latin-1")))
+    value: str = latin1(lambda ctx: ctx.length)
+
+
+@dataclass
+class StringAscii(StringBase):
+    length: int = built("I", lambda ctx: len(ctx.value.encode("ascii")))
+    value: str = ascii(lambda ctx: ctx.length)
 
 
 @dataclass
@@ -164,14 +182,14 @@ class ProtocolVersion(DataStruct):
 @dataclass
 class SupportedSecurityTypes(DataStruct):
     num_types: int = built("B", lambda ctx: len(ctx.types))
-    _types: String | list[int] = switch(lambda ctx: ctx.num_types)(
-        _0=(String, subfield()),
+    _types: StringUtf8 | list[int] = switch(lambda ctx: ctx.num_types)(
+        _0=(StringUtf8, subfield()),
         default=(list[int], repeat(lambda ctx: ctx.num_types)(field("B"))),
     )
 
     @property
     def types(self) -> list[int]:
-        if isinstance(self._types, String):
+        if isinstance(self._types, StringBase):
             raise ValueError(f"Server sent error instead of security types: {self._types}")
         return self._types
 
@@ -262,7 +280,7 @@ class ServerInit(DataStruct):
     width: int = field("H")
     height: int = field("H")
     pix_fmt: PixelFormat = subfield()
-    name: String = subfield()
+    name: StringUtf8 = subfield()
 
     def __str__(self) -> str:
         return (
@@ -359,14 +377,14 @@ class PointerEvent(ClientEventBase):
 @dataclass
 class ClientCutText(ClientEventBase):
     _pad: EllipsisType = padding(3)
-    text: String = subfield()
+    text: StringLatin1 = subfield()
 
     def process(self, ctx: RFBContext) -> None:
         print(f"Client cut text: {self}")
         ctx.clipboard = str(self.text)
 
     def __str__(self) -> str:
-        return f"Text: {self.text}"
+        return str(self.text)
 
 
 @dataclass
