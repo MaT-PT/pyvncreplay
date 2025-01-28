@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Buffer
+from enum import Enum, auto
 from io import SEEK_CUR, SEEK_END, SEEK_SET, BufferedIOBase
 from typing import BinaryIO, Iterable, Self
 
 from scapy.layers.inet import TCP
 from scapy.packet import Packet, Raw
 from scapy.plist import PacketList
+
+
+class PacketOrigin(Enum):
+    CLIENT = auto()
+    SERVER = auto()
 
 
 class PacketStreamBytes(Iterable[bytes]):
@@ -19,11 +25,14 @@ class PacketStreamBytes(Iterable[bytes]):
     def __next__(self) -> bytes:
         return next(self.packets).load
 
+    def __str__(self) -> str:
+        return f"{type(self).__name__}({self.packets})"
+
 
 class DataStreamReader(BufferedIOBase, BinaryIO):
     def __init__(self, datastream: Iterable[bytes]) -> None:
         self._datastream = iter(datastream)
-        self._buffer: bytes = b""
+        self._buffer = bytearray()
         self._buffer_offset: int = 0
 
     def readable(self) -> bool:
@@ -53,7 +62,7 @@ class DataStreamReader(BufferedIOBase, BinaryIO):
             new_offset = len(self._buffer)
         else:
             new_offset = self._buffer_offset + size
-        data = self._buffer[self._buffer_offset : new_offset]
+        data = bytes(self._buffer[self._buffer_offset : new_offset])
         self._buffer_offset = new_offset
         return data
 
@@ -89,6 +98,24 @@ class DataStreamReader(BufferedIOBase, BinaryIO):
             self._buffer_offset = len(self._buffer) + offset
         return self._buffer_offset
 
+    def peek(self, size: int = 0, /) -> bytes:
+        if size == 0:
+            return b""
+        data = self.read(size)
+        self.seek(-size, SEEK_CUR)
+        return data
+
+    def __str__(self) -> str:
+        try:
+            ds = self._datastream
+        except AttributeError:
+            ds = None
+        try:
+            bo = self._buffer_offset
+        except AttributeError:
+            bo = None
+        return f"{type(self).__name__}({ds}, offset={bo})"
+
     # The following methods are necessary to prevent type checking errors
 
     def write(self, buffer: Buffer, /) -> int:
@@ -102,10 +129,12 @@ class DataStreamReader(BufferedIOBase, BinaryIO):
 
 
 class PacketStream(Iterable[Packet]):
-    def __init__(self, packets: Iterable[Packet]) -> None:
+    def __init__(self, packets: Iterable[Packet], origin: PacketOrigin | None = None) -> None:
         self._iter = iter(packets)
         self._next: Packet | None = next(self._iter, None)
-        self._timestamp: float = float(self._next.time) if self._next is not None else 0.0
+        self._timestamp = self.next_timestamp
+        self._origin = origin
+        self._bytestream = DataStreamReader(PacketStreamBytes(self))
 
     def __iter__(self) -> Self:
         return self
@@ -119,18 +148,35 @@ class PacketStream(Iterable[Packet]):
         return pkt
 
     @property
+    def peek_next(self) -> Packet | None:
+        return self._next
+
+    @property
     def next_load(self) -> bytes:
         load = next(self).load
         assert isinstance(load, bytes)
         return load
 
     @property
-    def timestamp(self) -> float:
+    def timestamp(self) -> float | None:
         return self._timestamp
 
     @property
+    def next_timestamp(self) -> float | None:
+        if self._next is None:
+            return None
+        return float(self._next.time)
+
+    @property
     def bytestream(self) -> DataStreamReader:
-        return DataStreamReader(PacketStreamBytes(self))
+        return self._bytestream
+
+    @property
+    def origin(self) -> PacketOrigin | None:
+        return self._origin
+
+    def __str__(self) -> str:
+        return f"{type(self).__name__}(timestamp={self.timestamp}, origin={self.origin})"
 
 
 class ClientServerPacketStream(Iterable[Packet]):
@@ -140,32 +186,24 @@ class ClientServerPacketStream(Iterable[Packet]):
         srv_stream: PacketStream | Iterable[Packet],
     ) -> None:
         if not isinstance(cli_stream, PacketStream):
-            cli_stream = PacketStream(cli_stream)
+            cli_stream = PacketStream(cli_stream, PacketOrigin.CLIENT)
         if not isinstance(srv_stream, PacketStream):
-            srv_stream = PacketStream(srv_stream)
+            srv_stream = PacketStream(srv_stream, PacketOrigin.SERVER)
         self.cli_stream = cli_stream
         self.srv_stream = srv_stream
-        self._next_cli: Packet | None = next(self.cli_stream, None)
-        self._next_srv: Packet | None = next(self.srv_stream, None)
-        self.is_server: bool = True
+        self.packet_origin: PacketOrigin = PacketOrigin.CLIENT
 
     def __iter__(self) -> Self:
         return self
 
     def next_client(self) -> Packet:
-        pkt = self._next_cli
-        if pkt is None:
-            raise StopIteration
-        self._next_cli = next(self.cli_stream, None)
-        self.is_server = False
+        pkt = next(self.cli_stream)
+        self.packet_origin = PacketOrigin.CLIENT
         return pkt
 
     def next_server(self) -> Packet:
-        pkt = self._next_srv
-        if pkt is None:
-            raise StopIteration
-        self._next_srv = next(self.srv_stream, None)
-        self.is_server = True
+        pkt = next(self.srv_stream)
+        self.packet_origin = PacketOrigin.SERVER
         return pkt
 
     def next_cli_load(self) -> bytes:
@@ -179,29 +217,35 @@ class ClientServerPacketStream(Iterable[Packet]):
         return load
 
     def __next__(self) -> Packet:
-        if self._next_cli is None:
+        next_cli = self.cli_stream.peek_next
+        next_srv = self.srv_stream.peek_next
+        if next_cli is None:
             return self.next_server()
-        if self._next_srv is None:
+        if next_srv is None:
             return self.next_client()
-        if self._next_cli.time < self._next_srv.time:
+        if next_cli.time < next_srv.time:
             return self.next_client()
         return self.next_server()
 
     @property
-    def client_timestamp(self) -> float:
+    def client_timestamp(self) -> float | None:
         return self.cli_stream.timestamp
 
     @property
-    def server_timestamp(self) -> float:
+    def server_timestamp(self) -> float | None:
         return self.srv_stream.timestamp
 
     @property
-    def timestamp(self) -> float:
-        if self._next_cli is None:
-            return self.server_timestamp
-        if self._next_srv is None:
-            return self.client_timestamp
-        return min(self.client_timestamp, self.server_timestamp)
+    def next_packet_origin(self) -> PacketOrigin | None:
+        cli_time = self.cli_stream.next_timestamp
+        srv_time = self.srv_stream.next_timestamp
+        if srv_time is None:
+            if cli_time is None:
+                return None
+            return PacketOrigin.CLIENT
+        if cli_time is None:
+            return PacketOrigin.SERVER
+        return PacketOrigin.SERVER if srv_time < cli_time else PacketOrigin.CLIENT
 
 
 def get_streams(pcap: PacketList) -> ClientServerPacketStream:

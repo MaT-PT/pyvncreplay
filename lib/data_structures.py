@@ -320,6 +320,11 @@ class ClientEventBase(EventBase, ABC):
 
 
 @dataclass
+class ServerEventBase(EventBase, ABC):
+    """Base class for server events."""
+
+
+@dataclass
 class SetPixelFormat(ClientEventBase):
     _pad: EllipsisType = padding(3)
     pix_fmt: PixelFormat = subfield()
@@ -407,31 +412,6 @@ class ClientCutText(ClientEventBase):
 
     def __str__(self) -> str:
         return str(self.text)
-
-
-@dataclass
-class ClientEvent(DataStruct):
-    msg_type: int = field("B")
-    timestamp: float = virtual(lambda ctx: ctx._.rfb_context.packet_stream.client_timestamp)
-    event: ClientEventBase = switch(lambda ctx: ctx.msg_type)(
-        _0=(SetPixelFormat, subfield()),
-        _2=(SetEncodings, subfield()),
-        _3=(FramebufferUpdateRequest, subfield()),
-        _4=(KeyEvent, subfield()),
-        _5=(PointerEvent, subfield()),
-        _6=(ClientCutText, subfield()),
-    )
-
-    def process(self, ctx: RFBContext) -> None:
-        self.event.process(ctx)
-
-    def __str__(self) -> str:
-        return f"[CLIENT] Event type {self.msg_type}: {self.event!r}"
-
-
-@dataclass
-class ServerEventBase(EventBase, ABC):
-    """Base class for server events."""
 
 
 @dataclass
@@ -524,10 +504,38 @@ class ServerCutText(ServerEventBase):
         return str(self.text)
 
 
+def get_timestamp(ctx: Context, is_server: bool) -> float | None:
+    rfb_context: RFBContext | None = (ctx._ or ctx).rfb_context
+    if rfb_context is None:
+        return None
+    stream = rfb_context.packet_stream
+    return stream.server_timestamp if is_server else stream.client_timestamp
+
+
+@dataclass
+class ClientEvent(DataStruct):
+    msg_type: int = field("B")
+    timestamp: float = virtual(lambda ctx: get_timestamp(ctx, is_server=False))  # type: ignore[arg-type, return-value]
+    event: ClientEventBase = switch(lambda ctx: ctx.msg_type)(
+        _0=(SetPixelFormat, subfield()),
+        _2=(SetEncodings, subfield()),
+        _3=(FramebufferUpdateRequest, subfield()),
+        _4=(KeyEvent, subfield()),
+        _5=(PointerEvent, subfield()),
+        _6=(ClientCutText, subfield()),
+    )
+
+    def process(self, ctx: RFBContext) -> None:
+        self.event.process(ctx)
+
+    def __str__(self) -> str:
+        return f"[CLIENT] [{self.timestamp:.6f}] Event type {self.msg_type}: {self.event!r}"
+
+
 @dataclass
 class ServerEvent(DataStruct):
     msg_type: int = field("B")
-    timestamp: float = virtual(lambda ctx: ctx._.rfb_context.packet_stream.server_timestamp)
+    timestamp: float = virtual(lambda ctx: get_timestamp(ctx, is_server=True))  # type: ignore[arg-type, return-value]
     event: ServerEventBase = switch(lambda ctx: ctx.msg_type)(
         _0=(FramebufferUpdate, subfield()),
         _1=(SetColourMapEntries, subfield()),
@@ -539,7 +547,7 @@ class ServerEvent(DataStruct):
         self.event.process(ctx)
 
     def __str__(self) -> str:
-        return f"[SERVER] Event type {self.msg_type}: {self.event!r}"
+        return f"[SERVER] [{self.timestamp:.6f}] Event type {self.msg_type}: {self.event!r}"
 
 
 def not_eof(ctx: Context) -> bool:
