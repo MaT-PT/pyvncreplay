@@ -3,22 +3,22 @@ from __future__ import annotations
 from scapy.layers.inet import IP, TCP
 from scapy.plist import PacketList
 
+from .client_events import ClientEvent
 from .constants import SecurityResultVal, SecurityTypeVal
 from .data_structures import (
-    ClientEvent,
     ClientInit,
     Framebuffer,
     ProtocolVersion,
     RFBContext,
     SecurityResult,
     SelectedSecurityType,
-    ServerEvent,
     ServerInit,
     ServerSecurityType,
     SupportedSecurityTypes,
     VNCSecurityChallenge,
 )
 from .packet_stream import ClientServerPacketStream, PacketOrigin, get_streams
+from .server_events import ServerEvent
 
 
 def process_handshake(stream: ClientServerPacketStream, rfb_context: RFBContext) -> None:
@@ -85,11 +85,9 @@ def process_events(stream: ClientServerPacketStream, rfb_context: RFBContext) ->
     while True:
         match stream.next_packet_origin:
             case PacketOrigin.SERVER:
-                print("[Server]", stream.next_srv_load())
-                continue
-                # event = ServerEvent.unpack(stream.srv_stream.bytestream, rfb_context=rfb_context)
-                # print(event)
-                # event.process(rfb_context)
+                event = ServerEvent.unpack(stream.srv_stream.bytestream, rfb_context=rfb_context)
+                print(event)
+                event.process(rfb_context)
 
             case PacketOrigin.CLIENT:
                 event = ClientEvent.unpack(stream.cli_stream.bytestream, rfb_context=rfb_context)
