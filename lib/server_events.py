@@ -6,6 +6,7 @@ from datastruct import DataStruct
 from datastruct.fields import (
     action,
     built,
+    cond,
     field,
     padding,
     probe,
@@ -18,6 +19,7 @@ from PIL import Image
 
 from .constants import Encoding
 from .data_structures import (
+    BasicPixelFormat,
     Colour,
     EventBase,
     Rectangle,
@@ -27,6 +29,7 @@ from .data_structures import (
     get_timestamp,
     not_eof,
 )
+from .encodings import decode_zrle
 
 
 class ServerEventBase(EventBase, ABC):
@@ -40,6 +43,9 @@ class FramebufferUpdateBase(DataStruct, ABC):
 
 class FramebufferUpdatePixelData(FramebufferUpdateBase, ABC):
     pixdata: bytes
+    # pix_bpp: int | None = virtual(lambda ctx: ctx._.pix_bpp)
+    # pix_depth: int | None = virtual(lambda ctx: ctx._.pix_depth)
+    _probe_pix: EllipsisType = probe()
 
     @abstractmethod
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes | Image.Image: ...
@@ -128,12 +134,25 @@ class FramebufferUpdateZlibHex(FramebufferUpdatePixelData):
 @dataclass
 class FramebufferUpdateZrle(FramebufferUpdateZlib):
     _msg: EllipsisType = action(lambda ctx: print("[*] ZRLE pixel data"))
+    pix_bpp: int | None = cond(lambda ctx: ctx._.pix_bpp is not None)(
+        virtual(lambda ctx: ctx._.pix_bpp)
+    )
+    pix_depth: int | None = cond(lambda ctx: ctx._.pix_depth is not None)(
+        virtual(lambda ctx: ctx._.pix_depth)
+    )
+    _msg2: EllipsisType = action(lambda ctx: print(f"{ctx.pix_bpp=}, {ctx._.pix_bpp=},"))
     _probe: EllipsisType = probe()
 
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
+        fb = ctx.framebuffer
+        if fb is None:
+            raise ValueError("Framebuffer not initialized")
         data = super().decode_pixdata(ctx, rectangle)
         print("Decompressed data:", data)
-        raise NotImplementedError
+        pix_fmt: BasicPixelFormat = fb.pix_fmt
+        if self.pix_bpp is not None and self.pix_depth is not None:
+            pix_fmt = BasicPixelFormat(self.pix_bpp, self.pix_depth, pix_fmt.big_endian, True)
+        return decode_zrle(data, rectangle.size, pix_fmt)
 
 
 @dataclass
@@ -163,6 +182,8 @@ class FramebufferUpdateTightPng(FramebufferUpdatePixelData):
 @dataclass
 class FrameBufferUpdatePseudoCursorWithAlpha(FramebufferUpdatePseudo):
     _msg: EllipsisType = action(lambda ctx: print("[*] Pseudo cursor with alpha"))
+    pix_bpp: int = virtual(lambda ctx: 32)  # type: ignore[arg-type, return-value]
+    pix_depth: int = virtual(lambda ctx: 32)  # type: ignore[arg-type, return-value]
     encoding: Encoding = field("i")
     _probe: EllipsisType = probe()
     cursor_pixels: FramebufferUpdatePixelData = switch(lambda ctx: ctx.encoding)(

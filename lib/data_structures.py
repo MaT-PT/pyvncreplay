@@ -66,11 +66,30 @@ class Rectangle(DataStruct):
 
 
 @dataclass
-class PixelFormat(DataStruct):
+class BasicPixelFormat(DataStruct):
     bits_per_pixel: int = field("B")
     depth: int = field("B")
     big_endian: bool = field("?")
     true_colour: bool = field("?")
+
+    @property
+    def bytes_per_pixel(self) -> int:
+        return self.bits_per_pixel // 8
+
+    @property
+    def cpixel_size(self) -> int:
+        if self.true_colour and self.bits_per_pixel == 32 and self.depth <= 24:
+            return 3
+        return self.bytes_per_pixel
+
+    def decode_cpixel(self, cpixel: bytes) -> bytes:
+        if self.cpixel_size == 3:
+            return b"\x00" + cpixel
+        return cpixel
+
+
+@dataclass
+class PixelFormat(BasicPixelFormat):
     red_max: int = field("H")
     green_max: int = field("H")
     blue_max: int = field("H")
@@ -78,10 +97,6 @@ class PixelFormat(DataStruct):
     green_shift: int = field("B")
     blue_shift: int = field("B")
     _pad: EllipsisType = align(16)
-
-    @property
-    def bytes_per_pixel(self) -> int:
-        return self.bits_per_pixel // 8
 
     def __str__(self) -> str:
         return (

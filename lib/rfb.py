@@ -110,7 +110,4 @@ def process_pcap(pcap: PacketList) -> None:
     print(rfb_context.typed_text)
     print("-" * 80)
 
-    # if rfb_context.framebuffer is not None:
-    #     rfb_context.framebuffer._cursor_image.show()
-
     print("Done")
