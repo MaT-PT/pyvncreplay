@@ -173,6 +173,9 @@ class Framebuffer:
             red = (pix_int >> self.pix_fmt.red_shift) & self.pix_fmt.red_max
             green = (pix_int >> self.pix_fmt.green_shift) & self.pix_fmt.green_max
             blue = (pix_int >> self.pix_fmt.blue_shift) & self.pix_fmt.blue_max
+            red = red * 255 // self.pix_fmt.red_max
+            green = green * 255 // self.pix_fmt.green_max
+            blue = blue * 255 // self.pix_fmt.blue_max
             data.extend((red, green, blue))
         return data
 
@@ -188,7 +191,7 @@ class Framebuffer:
 
         if isinstance(img, bytes):
             img = Image.frombytes("RGB", (w, h), self.decode_pixel_data(img))
-        self._screen.paste((x, y), img)
+        self._screen.paste(img, (x, y))
 
     def update_cursor(
         self, img: bytes | Image.Image, size: tuple[int, int], center: tuple[int, int]
