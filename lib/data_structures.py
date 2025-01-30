@@ -348,13 +348,27 @@ def get_framebuffer(ctx: Context) -> Framebuffer:
     return fb
 
 
-def get_fb_byte_size(ctx: Context) -> int:
+def get_bpp(ctx: Context) -> int:
     pix_bpp: int | None = ctx.pix_bpp
     # Allow overriding the bytes-per-pixel value for cursor pixels (always 32-bit RGBA)
     if pix_bpp is not None:
-        return pix_bpp // 8
-    rfb_ctx = get_rfb_context(ctx)
-    return rfb_ctx.fb_byte_size
+        return pix_bpp
+    fb = get_framebuffer(ctx)
+    return fb.pix_fmt.bits_per_pixel
+
+
+def get_depth(ctx: Context) -> int:
+    pix_depth: int | None = ctx.pix_depth
+    if pix_depth is not None:
+        return pix_depth
+    fb = get_framebuffer(ctx)
+    return fb.pix_fmt.depth
+
+
+def get_frame_size_bytes(ctx: Context) -> int:
+    bpp = get_bpp(ctx)
+    fb = get_framebuffer(ctx)
+    return fb.width * fb.height * bpp // 8
 
 
 @dataclass
