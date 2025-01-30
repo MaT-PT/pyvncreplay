@@ -192,6 +192,8 @@ class Framebuffer:
         if isinstance(img, bytes):
             img = Image.frombytes("RGB", (w, h), self.decode_pixel_data(img))
         self._screen.paste(img, (x, y))
+        # self._screen.show()
+        # input("Press Enter to continue...")
 
     def update_cursor(
         self, img: bytes | Image.Image, size: tuple[int, int], center: tuple[int, int]
@@ -205,7 +207,7 @@ class Framebuffer:
             img = Image.frombytes("RGBA", size, data)
         self._cursor_img = img
         self._cursor_center = center
-        img.show()
+        # img.show()
 
     def update_cursor_position(self, cursor_event: "PointerEvent") -> None:
         if self._cursor is None:
@@ -347,10 +349,10 @@ def get_framebuffer(ctx: Context) -> Framebuffer:
 
 
 def get_fb_byte_size(ctx: Context) -> int:
-    Bpp: int | None = ctx.Bpp
+    pix_bpp: int | None = ctx.pix_bpp
     # Allow overriding the bytes-per-pixel value for cursor pixels (always 32-bit RGBA)
-    if Bpp is not None:
-        return Bpp
+    if pix_bpp is not None:
+        return pix_bpp // 8
     rfb_ctx = get_rfb_context(ctx)
     return rfb_ctx.fb_byte_size
 

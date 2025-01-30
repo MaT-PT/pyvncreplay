@@ -3,18 +3,7 @@ from dataclasses import dataclass
 from types import EllipsisType
 
 from datastruct import DataStruct
-from datastruct.fields import (
-    action,
-    built,
-    cond,
-    field,
-    padding,
-    probe,
-    repeat,
-    subfield,
-    switch,
-    virtual,
-)
+from datastruct.fields import action, built, cond, field, padding, repeat, subfield, switch, virtual
 from PIL import Image
 
 from .constants import Encoding
@@ -45,7 +34,6 @@ class FramebufferUpdatePixelData(FramebufferUpdateBase, ABC):
     pixdata: bytes
     # pix_bpp: int | None = virtual(lambda ctx: ctx._.pix_bpp)
     # pix_depth: int | None = virtual(lambda ctx: ctx._.pix_depth)
-    _probe_pix: EllipsisType = probe()
 
     @abstractmethod
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes | Image.Image: ...
@@ -83,24 +71,18 @@ class FramebufferUpdateCopyRect(FramebufferUpdatePixelData):
 
 @dataclass
 class FramebufferUpdateRre(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
 
 @dataclass
 class FramebufferUpdateCorre(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
 
 @dataclass
 class FramebufferUpdateHextile(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
@@ -117,16 +99,12 @@ class FramebufferUpdateZlib(FramebufferUpdatePixelData):
 
 @dataclass
 class FramebufferUpdateTight(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
 
 @dataclass
 class FramebufferUpdateZlibHex(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
@@ -141,14 +119,13 @@ class FramebufferUpdateZrle(FramebufferUpdateZlib):
         virtual(lambda ctx: ctx._.pix_depth)
     )
     _msg2: EllipsisType = action(lambda ctx: print(f"{ctx.pix_bpp=}, {ctx._.pix_bpp=},"))
-    _probe: EllipsisType = probe()
 
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         fb = ctx.framebuffer
         if fb is None:
             raise ValueError("Framebuffer not initialized")
         data = super().decode_pixdata(ctx, rectangle)
-        print("Decompressed data:", data)
+        # print("Decompressed data:", data)
         pix_fmt: BasicPixelFormat = fb.pix_fmt
         if self.pix_bpp is not None and self.pix_depth is not None:
             pix_fmt = BasicPixelFormat(self.pix_bpp, self.pix_depth, pix_fmt.big_endian, True)
@@ -157,24 +134,18 @@ class FramebufferUpdateZrle(FramebufferUpdateZlib):
 
 @dataclass
 class FramebufferUpdateJpeg(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
 
 @dataclass
 class FramebufferUpdateOpenH264(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
 
 @dataclass
 class FramebufferUpdateTightPng(FramebufferUpdatePixelData):
-    _: EllipsisType = probe()
-
     def decode_pixdata(self, ctx: RFBContext, rectangle: Rectangle) -> bytes:
         raise NotImplementedError
 
@@ -185,20 +156,19 @@ class FrameBufferUpdatePseudoCursorWithAlpha(FramebufferUpdatePseudo):
     pix_bpp: int = virtual(lambda ctx: 32)  # type: ignore[arg-type, return-value]
     pix_depth: int = virtual(lambda ctx: 32)  # type: ignore[arg-type, return-value]
     encoding: Encoding = field("i")
-    _probe: EllipsisType = probe()
     cursor_pixels: FramebufferUpdatePixelData = switch(lambda ctx: ctx.encoding)(
-        RAW=(FramebufferUpdateRaw, subfield(Bpp=4)),
-        COPYRECT=(FramebufferUpdateCopyRect, subfield(Bpp=4)),
-        RRE=(FramebufferUpdateRre, subfield(Bpp=4)),
-        CORRE=(FramebufferUpdateCorre, subfield(Bpp=4)),
-        HEXTILE=(FramebufferUpdateHextile, subfield(Bpp=4)),
-        ZLIB=(FramebufferUpdateZlib, subfield(Bpp=4)),
-        TIGHT=(FramebufferUpdateTight, subfield(Bpp=4)),
-        ZLIBHEX=(FramebufferUpdateZlibHex, subfield(Bpp=4)),
-        ZRLE=(FramebufferUpdateZrle, subfield(Bpp=4)),
-        JPEG=(FramebufferUpdateJpeg, subfield(Bpp=4)),
-        OPENH264=(FramebufferUpdateOpenH264, subfield(Bpp=4)),
-        TIGHT_PNG=(FramebufferUpdateTightPng, subfield(Bpp=4)),
+        RAW=(FramebufferUpdateRaw, subfield(pix_bpp=32)),
+        COPYRECT=(FramebufferUpdateCopyRect, subfield(pix_bpp=32)),
+        RRE=(FramebufferUpdateRre, subfield(pix_bpp=32)),
+        CORRE=(FramebufferUpdateCorre, subfield(pix_bpp=32)),
+        HEXTILE=(FramebufferUpdateHextile, subfield(pix_bpp=32)),
+        ZLIB=(FramebufferUpdateZlib, subfield(pix_bpp=32)),
+        TIGHT=(FramebufferUpdateTight, subfield(pix_bpp=32)),
+        ZLIBHEX=(FramebufferUpdateZlibHex, subfield(pix_bpp=32)),
+        ZRLE=(FramebufferUpdateZrle, subfield(pix_bpp=32)),
+        JPEG=(FramebufferUpdateJpeg, subfield(pix_bpp=32)),
+        OPENH264=(FramebufferUpdateOpenH264, subfield(pix_bpp=32)),
+        TIGHT_PNG=(FramebufferUpdateTightPng, subfield(pix_bpp=32)),
     )
 
     def process(self, ctx: RFBContext, rectangle: Rectangle) -> None:
@@ -218,7 +188,6 @@ class FrameBufferUpdatePseudoCursorWithAlpha(FramebufferUpdatePseudo):
 class FramebufferUpdateRectangle(DataStruct):
     rectangle: Rectangle = subfield()
     encoding: Encoding = field("i")
-    _: EllipsisType = probe()
     data: FramebufferUpdateBase = switch(lambda ctx: ctx.encoding)(
         RAW=(FramebufferUpdateRaw, subfield()),
         COPYRECT=(FramebufferUpdateCopyRect, subfield()),
