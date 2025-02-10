@@ -117,7 +117,13 @@ def process_pcap(pcap: PacketList, outdir: str | Path) -> None:
         # f"screen_{timestamp}_{rectangle.width}_{rectangle.height}_{rectangle.x}_{rectangle.y}.png"
         screen.save(outdir / f"screen_{timestamp}.png")
 
+    def on_clipboard(data: str) -> None:
+        print(f"Clipboard: {data}")
+        (outdir / f"clipboard_{stream.timestamp}.txt").write_text(data)
+
     rfb_context.framebuffer.on("screen_update", on_screen_update)
+    rfb_context.on("clipboard", on_clipboard)
+
     process_events(stream, rfb_context)
 
     print()
@@ -125,5 +131,7 @@ def process_pcap(pcap: PacketList, outdir: str | Path) -> None:
     print("-" * 80)
     print(rfb_context.typed_text)
     print("-" * 80)
+
+    (outdir / "typed_text.txt").write_text(rfb_context.typed_text)
 
     print("Done")

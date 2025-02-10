@@ -236,6 +236,16 @@ class ClientServerPacketStream(Iterable[Packet]):
         return self.srv_stream.timestamp
 
     @property
+    def timestamp(self) -> float | None:
+        origin = self.packet_origin
+        match origin:
+            case PacketOrigin.CLIENT:
+                return self.client_timestamp
+            case PacketOrigin.SERVER:
+                return self.server_timestamp
+        return None  # type: ignore[unreachable]
+
+    @property
     def next_packet_origin(self) -> PacketOrigin | None:
         cli_time = self.cli_stream.next_timestamp
         srv_time = self.srv_stream.next_timestamp
