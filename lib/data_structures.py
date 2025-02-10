@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from functools import partial, total_ordering
 from types import EllipsisType
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Callable, Self
 from zlib import decompressobj
 
 from datastruct import NETWORK, Context, DataStruct, datastruct_config
@@ -154,10 +154,16 @@ class Framebuffer:
     _cursor_img: Image.Image | None = dataclass_field(init=False, default=None)
     _cursor_path_img: Image.Image = dataclass_field(init=False)
     _cursor_center: tuple[int, int] = (0, 0)
+    _event_handlers: dict[str, Callable[..., None]] = dataclass_field(
+        init=False, default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         self._screen = Image.new("RGB", (self.width, self.height))
         self._cursor_path_img = Image.new("RGBA", (self.width, self.height))
+
+    def on(self, event: str, handler: Callable[..., None]) -> None:
+        self._event_handlers[event] = handler
 
     def decode_pixel_data(self, pix_data: bytes) -> bytearray:
         if not self.pix_fmt.true_colour:
@@ -192,6 +198,10 @@ class Framebuffer:
         if isinstance(img, bytes):
             img = Image.frombytes("RGB", (w, h), self.decode_pixel_data(img))
         self._screen.paste(img, (x, y))
+
+        handler = self._event_handlers.get("screen_update", None)
+        if handler is not None:
+            handler(self._screen, Rectangle(x, y, w, h))
         # self._screen.show()
         # input("Press Enter to continue...")
 
@@ -207,6 +217,10 @@ class Framebuffer:
             img = Image.frombytes("RGBA", size, data)
         self._cursor_img = img
         self._cursor_center = center
+
+        handler = self._event_handlers.get("update_cursor", None)
+        if handler is not None:
+            handler(self._cursor_img, size, center)
         # img.show()
 
     def update_cursor_position(self, cursor_event: "PointerEvent") -> None:
@@ -219,6 +233,10 @@ class Framebuffer:
             self._cursor_path_img.putpixel((cursor_event.x, cursor_event.y), (255, 0, 0, 255))
         except IndexError:
             pass
+
+        handler = self._event_handlers.get("update_cursor_position", None)
+        if handler is not None:
+            handler(self._cursor)
 
     def get_screen_rectangle(self, rectangle: Rectangle) -> Image.Image:
         return self._screen.crop(rectangle.corners)
@@ -288,6 +306,12 @@ class RFBContext:
     zlib_decompressor: "_Decompress" = dataclass_field(init=False, default_factory=decompressobj)
     _typed_text: str = dataclass_field(init=False, default="")
     _clipboard: str = dataclass_field(init=False, default="")
+    _event_handlers: dict[str, Callable[..., None] | None] = dataclass_field(
+        init=False, default_factory=dict
+    )
+
+    def on(self, event: str, handler: Callable[..., None]) -> None:
+        self._event_handlers[event] = handler
 
     @property
     def client_ip_port(self) -> str | None:
@@ -304,6 +328,10 @@ class RFBContext:
     def type_key(self, key: int) -> None:
         self._typed_text += XKey.get_name(key, raw_chars=True)
 
+        handler = self._event_handlers.get("type_key", None)
+        if handler is not None:
+            handler(key)
+
     @property
     def typed_text(self) -> str:
         return self._typed_text
@@ -315,6 +343,10 @@ class RFBContext:
     @clipboard.setter
     def clipboard(self, value: str) -> None:
         self._clipboard = value
+
+        handler = self._event_handlers.get("clipboard", None)
+        if handler is not None:
+            handler(value)
 
     @property
     def fb_byte_size(self) -> int:

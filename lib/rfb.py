@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from PIL.Image import Image
 from scapy.layers.inet import IP, TCP
 from scapy.plist import PacketList
 
@@ -9,6 +12,7 @@ from .data_structures import (
     ClientInit,
     Framebuffer,
     ProtocolVersion,
+    Rectangle,
     RFBContext,
     SecurityResult,
     SelectedSecurityType,
@@ -98,10 +102,22 @@ def process_events(stream: ClientServerPacketStream, rfb_context: RFBContext) ->
                 break
 
 
-def process_pcap(pcap: PacketList) -> None:
+def process_pcap(pcap: PacketList, outdir: str | Path) -> None:
+    if isinstance(outdir, str):
+        outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
     stream = get_streams(pcap)
     rfb_context = RFBContext(stream)
     process_handshake(stream, rfb_context)
+    assert rfb_context.framebuffer is not None
+
+    def on_screen_update(screen: Image, rectangle: Rectangle) -> None:
+        timestamp = stream.server_timestamp
+        # f"screen_{timestamp}_{rectangle.width}_{rectangle.height}_{rectangle.x}_{rectangle.y}.png"
+        screen.save(outdir / f"screen_{timestamp}.png")
+
+    rfb_context.framebuffer.on("screen_update", on_screen_update)
     process_events(stream, rfb_context)
 
     print()
